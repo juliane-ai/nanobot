@@ -5,6 +5,17 @@ HOME_DIR="${HOME:-/root}"
 NANOBOT_HOME="${NANOBOT_HOME:-${HOME_DIR}/.nanobot}"
 mkdir -p "$NANOBOT_HOME"
 
+echo "[boot] notion env check: NOTION_API_KEY=${NOTION_API_KEY:+set} NOTION_KEY=${NOTION_KEY:+set} NOTION_DATABASE_ID=${NOTION_DATABASE_ID:+set}" 1>&2
+if [ "${NOTION_API_KEY:-}" != "" ]; then
+  echo "[boot] notion env len: NOTION_API_KEY=${#NOTION_API_KEY}" 1>&2
+fi
+if [ "${NOTION_KEY:-}" != "" ]; then
+  echo "[boot] notion env len: NOTION_KEY=${#NOTION_KEY}" 1>&2
+fi
+if [ "${NOTION_DATABASE_ID:-}" != "" ]; then
+  echo "[boot] notion env len: NOTION_DATABASE_ID=${#NOTION_DATABASE_ID}" 1>&2
+fi
+
 if [ "${NOTION_API_KEY:-}" != "" ] || [ "${NOTION_KEY:-}" != "" ]; then
   mkdir -p "${HOME_DIR}/.config/notion"
   printf "%s" "${NOTION_API_KEY:-$NOTION_KEY}" > "${HOME_DIR}/.config/notion/api_key"
