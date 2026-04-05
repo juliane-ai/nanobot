@@ -28,4 +28,4 @@ aws_cli s3 sync "$S3_URI" "$NANOBOT_HOME" || true
 
 trap 'echo "[shutdown] final sync"; aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" || true' EXIT INT TERM
 
-exec nanobot gateway --host "${HOST:-0.0.0.0}" --port "${PORT:-18790}"
+exec nanobot gateway --port "${PORT:-18790}"
