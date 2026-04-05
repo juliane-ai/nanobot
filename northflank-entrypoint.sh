@@ -32,11 +32,23 @@ SYNC_PID1=$!
 # 信号处理：停止所有进程并同步
 shutdown() {
   echo "[shutdown] stopping all instances..."
-  kill $NANOBOT_PID1 $NANOBOT_PID2 2>/dev/null || true
-  wait $NANOBOT_PID1 $NANOBOT_PID2 2>/dev/null || true
+  if [ "${NANOBOT_PID1:-}" != "" ]; then
+    kill "$NANOBOT_PID1" 2>/dev/null || true
+  fi
+  if [ "${NANOBOT_PID2:-}" != "" ]; then
+    kill "$NANOBOT_PID2" 2>/dev/null || true
+  fi
+  if [ "${NANOBOT_PID1:-}" != "" ]; then
+    wait "$NANOBOT_PID1" 2>/dev/null || true
+  fi
+  if [ "${NANOBOT_PID2:-}" != "" ]; then
+    wait "$NANOBOT_PID2" 2>/dev/null || true
+  fi
   echo "[shutdown] final sync..."
   aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" || true
-  kill $SYNC_PID1 2>/dev/null || true
+  if [ "${SYNC_PID1:-}" != "" ]; then
+    kill "$SYNC_PID1" 2>/dev/null || true
+  fi
   exit 0
 }
 
@@ -52,5 +64,15 @@ echo "[boot] starting douyin bot on port 18791..."
 nanobot gateway --config "${NANOBOT_HOME}/config-douyin.json" --port 18791 &
 NANOBOT_PID2=$!
 
-# 等待任意进程退出
-wait -n $NANOBOT_PID1 $NANOBOT_PID2 2>/dev/null || true
+# 兼容 /bin/sh：持续运行直到任一子进程退出
+while true; do
+  if ! kill -0 "$NANOBOT_PID1" 2>/dev/null; then
+    echo "[monitor] main bot exited"
+    exit 0
+  fi
+  if ! kill -0 "$NANOBOT_PID2" 2>/dev/null; then
+    echo "[monitor] douyin bot exited"
+    exit 0
+  fi
+  sleep 2
+done
