@@ -4,6 +4,12 @@ set -eu
 NANOBOT_HOME="${NANOBOT_HOME:-/root/.nanobot}"
 mkdir -p "$NANOBOT_HOME"
 
+if [ "${NOTION_API_KEY:-}" != "" ] || [ "${NOTION_KEY:-}" != "" ]; then
+  mkdir -p /root/.config/notion
+  printf "%s" "${NOTION_API_KEY:-$NOTION_KEY}" > /root/.config/notion/api_key
+  chmod 600 /root/.config/notion/api_key || true
+fi
+
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   PYTHON_BIN="python"
