@@ -4,6 +4,19 @@ set -eu
 NANOBOT_HOME="${NANOBOT_HOME:-/root/.nanobot}"
 mkdir -p "$NANOBOT_HOME"
 
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+fi
+
+if command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  if ! "$PYTHON_BIN" -c 'import lark_oapi' >/dev/null 2>&1; then
+    if [ "${AUTO_INSTALL_PY_DEPS:-0}" = "1" ]; then
+      "$PYTHON_BIN" -m pip install --no-cache-dir lark-oapi || true
+    fi
+  fi
+fi
+
 : "${S3_BUCKET:?S3_BUCKET is required}"
 : "${S3_PREFIX:?S3_PREFIX is required}"
 : "${AWS_ENDPOINT_URL:?AWS_ENDPOINT_URL is required}"
