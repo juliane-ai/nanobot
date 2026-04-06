@@ -40,14 +40,14 @@ RUN useradd -m -u 1000 -s /bin/bash nanobot && \
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+COPY northflank-entrypoint.sh /northflank-entrypoint.sh
+RUN chmod +x /northflank-entrypoint.sh
+
 USER nanobot
 ENV HOME=/home/nanobot
 
 # Gateway default port
 EXPOSE 18790
-
-COPY northflank-entrypoint.sh /northflank-entrypoint.sh
-RUN chmod +x /northflank-entrypoint.sh
 
 ENTRYPOINT ["/northflank-entrypoint.sh"]
 CMD ["status"]
