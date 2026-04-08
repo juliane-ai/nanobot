@@ -39,7 +39,10 @@ fi
 : "${S3_PREFIX:?S3_PREFIX is required}"
 : "${AWS_ENDPOINT_URL:?AWS_ENDPOINT_URL is required}"
 
-S3_URI="s3://${S3_BUCKET}/${S3_PREFIX}"
+STATE_NAMESPACE="${STATE_NAMESPACE:-${HOSTNAME:-default}}"
+S3_URI="s3://${S3_BUCKET}/${S3_PREFIX}/${STATE_NAMESPACE}"
+echo "[boot] STATE_NAMESPACE=${STATE_NAMESPACE}"
+echo "[boot] S3_URI=${S3_URI}"
 INTERVAL="${SYNC_INTERVAL_SECONDS:-120}"
 
 SYNC_EXCLUDES="--exclude workspace-keeplearn/keep-learn-note/* --exclude 'workspace*/.git/*' --exclude 'workspace*/**/.git/*' --exclude '.github-manager.json'"
