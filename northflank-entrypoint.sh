@@ -40,12 +40,11 @@ fi
 : "${AWS_ENDPOINT_URL:?AWS_ENDPOINT_URL is required}"
 
 STATE_NAMESPACE="${STATE_NAMESPACE:-${HOSTNAME:-default}}"
-S3_URI="s3://${S3_BUCKET}/${S3_PREFIX}/${STATE_NAMESPACE}"
+S3_BASE_URI="s3://${S3_BUCKET}/${S3_PREFIX}"
+S3_URI="${S3_BASE_URI}/${STATE_NAMESPACE}"
 echo "[boot] STATE_NAMESPACE=${STATE_NAMESPACE}"
 echo "[boot] S3_URI=${S3_URI}"
 INTERVAL="${SYNC_INTERVAL_SECONDS:-120}"
-
-SYNC_EXCLUDES="--exclude workspace-keeplearn/keep-learn-note/* --exclude 'workspace*/.git/*' --exclude 'workspace*/**/.git/*' --exclude '.github-manager.json'"
 
 # Agent control: comma-separated list (default: main,douyin)
 # Note: Using START_AGENTS to avoid conflict with nanobot's pydantic-settings
@@ -64,16 +63,58 @@ aws_cli() {
   aws --endpoint-url "$AWS_ENDPOINT_URL" "$@"
 }
 
+aws_sync() {
+  src="$1"
+  dst="$2"
+  aws_cli s3 sync "$src" "$dst" \
+    --exclude "workspace-keeplearn/keep-learn-note/*" \
+    --exclude "workspace*/.git/*" \
+    --exclude "workspace*/**/.git/*" \
+    --exclude ".github-manager.json"
+}
+
 # 同步配置与运行时目录（同一个 NANOBOT_HOME 下包含 config.json + config-douyin.json）
 echo "[boot] restoring state from ${S3_URI} ..."
-aws_cli s3 sync "$S3_URI" "$NANOBOT_HOME" $SYNC_EXCLUDES || true
+aws_sync "$S3_URI" "$NANOBOT_HOME" || true
+
+# Bootstrap: if this namespace is empty/uninitialized, seed it from legacy base prefix once.
+BOOTSTRAP_MARKER_FILE="${NANOBOT_HOME}/.state_namespace_initialized"
+if [ ! -f "$BOOTSTRAP_MARKER_FILE" ]; then
+  echo "[boot] namespace not initialized; bootstrapping from legacy ${S3_BASE_URI} ..."
+  aws_sync "$S3_BASE_URI" "$NANOBOT_HOME" || true
+  printf "%s\n" "initialized_from_legacy_at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" > "$BOOTSTRAP_MARKER_FILE" || true
+  echo "[boot] seeding namespaced state to ${S3_URI} ..."
+  aws_sync "$NANOBOT_HOME" "$S3_URI" || true
+fi
+
+# Backward compatibility: if required configs are missing in the namespaced location,
+# fetch only those config files from the legacy base prefix.
+LEGACY_FETCHED=0
+if agent_enabled main && [ ! -f "${NANOBOT_HOME}/config.json" ]; then
+  echo "[boot] missing config.json; fetching from legacy ${S3_BASE_URI} ..."
+  aws_cli s3 cp "${S3_BASE_URI}/config.json" "${NANOBOT_HOME}/config.json" || true
+  LEGACY_FETCHED=1
+fi
+if agent_enabled douyin && [ ! -f "${NANOBOT_HOME}/config-douyin.json" ]; then
+  echo "[boot] missing config-douyin.json; fetching from legacy ${S3_BASE_URI} ..."
+  aws_cli s3 cp "${S3_BASE_URI}/config-douyin.json" "${NANOBOT_HOME}/config-douyin.json" || true
+  LEGACY_FETCHED=1
+fi
+if agent_enabled keeplearn && [ ! -f "${NANOBOT_HOME}/config-keeplearn.json" ]; then
+  echo "[boot] missing config-keeplearn.json; fetching from legacy ${S3_BASE_URI} ..."
+  aws_cli s3 cp "${S3_BASE_URI}/config-keeplearn.json" "${NANOBOT_HOME}/config-keeplearn.json" || true
+  LEGACY_FETCHED=1
+fi
+if [ "$LEGACY_FETCHED" = "1" ]; then
+  echo "[boot] legacy config fetch done"
+fi
 
 # 后台同步任务
 (
   while true; do
     sleep "$INTERVAL"
     echo "[sync] uploading state to ${S3_URI} ..."
-    aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" $SYNC_EXCLUDES
+    aws_sync "$NANOBOT_HOME" "$S3_URI"
   done
 ) &
 SYNC_PID1=$!
@@ -100,7 +141,7 @@ shutdown() {
     wait "$NANOBOT_PID3" 2>/dev/null || true
   fi
   echo "[shutdown] final sync..."
-  aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" $SYNC_EXCLUDES || true
+  aws_sync "$NANOBOT_HOME" "$S3_URI" || true
   if [ "${SYNC_PID1:-}" != "" ]; then
     kill "$SYNC_PID1" 2>/dev/null || true
   fi
