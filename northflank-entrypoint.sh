@@ -42,20 +42,22 @@ fi
 S3_URI="s3://${S3_BUCKET}/${S3_PREFIX}"
 INTERVAL="${SYNC_INTERVAL_SECONDS:-120}"
 
+SYNC_EXCLUDES="--exclude workspace-keeplearn/keep-learn-note/*"
+
 aws_cli() {
   aws --endpoint-url "$AWS_ENDPOINT_URL" "$@"
 }
 
 # 同步配置与运行时目录（同一个 NANOBOT_HOME 下包含 config.json + config-douyin.json）
 echo "[boot] restoring state from ${S3_URI} ..."
-aws_cli s3 sync "$S3_URI" "$NANOBOT_HOME" || true
+aws_cli s3 sync "$S3_URI" "$NANOBOT_HOME" $SYNC_EXCLUDES || true
 
 # 后台同步任务
 (
   while true; do
     sleep "$INTERVAL"
     echo "[sync] uploading state to ${S3_URI} ..."
-    aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI"
+    aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" $SYNC_EXCLUDES
   done
 ) &
 SYNC_PID1=$!
@@ -76,7 +78,7 @@ shutdown() {
     wait "$NANOBOT_PID2" 2>/dev/null || true
   fi
   echo "[shutdown] final sync..."
-  aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" || true
+  aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" $SYNC_EXCLUDES || true
   if [ "${SYNC_PID1:-}" != "" ]; then
     kill "$SYNC_PID1" 2>/dev/null || true
   fi
@@ -95,6 +97,11 @@ echo "[boot] starting douyin bot on port 18791..."
 nanobot gateway --config "${NANOBOT_HOME}/config-douyin.json" --port 18791 &
 NANOBOT_PID2=$!
 
+# 启动持续学习机器人（端口 18793）
+echo "[boot] starting keeplearn bot on port 18793..."
+nanobot gateway --config "${NANOBOT_HOME}/config-keeplearn.json" --port 18793 &
+NANOBOT_PID3=$!
+
 # 兼容 /bin/sh：持续运行直到任一子进程退出
 while true; do
   if ! kill -0 "$NANOBOT_PID1" 2>/dev/null; then
@@ -103,6 +110,10 @@ while true; do
   fi
   if ! kill -0 "$NANOBOT_PID2" 2>/dev/null; then
     echo "[monitor] douyin bot exited"
+    exit 0
+  fi
+  if ! kill -0 "$NANOBOT_PID3" 2>/dev/null; then
+    echo "[monitor] keeplearn bot exited"
     exit 0
   fi
   sleep 2
