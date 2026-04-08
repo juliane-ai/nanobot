@@ -45,12 +45,13 @@ INTERVAL="${SYNC_INTERVAL_SECONDS:-120}"
 SYNC_EXCLUDES="--exclude workspace-keeplearn/keep-learn-note/* --exclude 'workspace*/.git/*' --exclude 'workspace*/**/.git/*' --exclude '.github-manager.json'"
 
 # Agent control: comma-separated list (default: main,douyin)
-NANOBOT_AGENTS="${NANOBOT_AGENTS:-main,douyin}"
-echo "[boot] NANOBOT_AGENTS=${NANOBOT_AGENTS}"
+# Note: Using START_AGENTS to avoid conflict with nanobot's pydantic-settings
+START_AGENTS="${START_AGENTS:-main,douyin}"
+echo "[boot] START_AGENTS=${START_AGENTS}"
 
 # Helper: check if agent is enabled
 agent_enabled() {
-  case ",${NANOBOT_AGENTS}," in
+  case ",${START_AGENTS}," in
     *",$1,"*) return 0 ;;
     *) return 1 ;;
   esac
