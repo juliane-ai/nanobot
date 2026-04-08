@@ -44,6 +44,18 @@ INTERVAL="${SYNC_INTERVAL_SECONDS:-120}"
 
 SYNC_EXCLUDES="--exclude workspace-keeplearn/keep-learn-note/* --exclude 'workspace*/.git/*' --exclude 'workspace*/**/.git/*' --exclude '.github-manager.json'"
 
+# Agent control: comma-separated list (default: main,douyin)
+NANOBOT_AGENTS="${NANOBOT_AGENTS:-main,douyin}"
+echo "[boot] NANOBOT_AGENTS=${NANOBOT_AGENTS}"
+
+# Helper: check if agent is enabled
+agent_enabled() {
+  case ",${NANOBOT_AGENTS}," in
+    *",$1,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 aws_cli() {
   aws --endpoint-url "$AWS_ENDPOINT_URL" "$@"
 }
@@ -94,14 +106,18 @@ shutdown() {
 trap 'shutdown' EXIT INT TERM
 
 # 启动主机器人（端口 18790）
-echo "[boot] starting main bot on port 18790..."
-nanobot gateway --config "${NANOBOT_HOME}/config.json" --port 18790 &
-NANOBOT_PID1=$!
+if agent_enabled main; then
+  echo "[boot] starting main bot on port 18790..."
+  nanobot gateway --config "${NANOBOT_HOME}/config.json" --port 18790 &
+  NANOBOT_PID1=$!
+fi
 
 # 启动抖音日报机器人（端口 18791）
-echo "[boot] starting douyin bot on port 18791..."
-nanobot gateway --config "${NANOBOT_HOME}/config-douyin.json" --port 18791 &
-NANOBOT_PID2=$!
+if agent_enabled douyin; then
+  echo "[boot] starting douyin bot on port 18791..."
+  nanobot gateway --config "${NANOBOT_HOME}/config-douyin.json" --port 18791 &
+  NANOBOT_PID2=$!
+fi
 
 # 启动持续学习机器人（端口 18793）
 KEEPL_RESTARTS=0
@@ -114,33 +130,53 @@ start_keeplearn() {
   NANOBOT_PID3=$!
 }
 
-start_keeplearn
+if agent_enabled keeplearn; then
+  start_keeplearn
+fi
 
-# 兼容 /bin/sh：持续运行直到任一子进程退出
+# 兼容 /bin/sh：持续运行直到任一关键子进程退出
 while true; do
-  if ! kill -0 "$NANOBOT_PID1" 2>/dev/null; then
-    echo "[monitor] main bot exited"
-    exit 0
-  fi
-  if ! kill -0 "$NANOBOT_PID2" 2>/dev/null; then
-    echo "[monitor] douyin bot exited"
-    exit 0
-  fi
-  if ! kill -0 "$NANOBOT_PID3" 2>/dev/null; then
-    KEEPL_EXIT_CODE=0
-    wait "$NANOBOT_PID3" 2>/dev/null || KEEPL_EXIT_CODE=$?
-    echo "[monitor] keeplearn bot exited (code=${KEEPL_EXIT_CODE})"
-
-    KEEPL_RESTARTS=$((KEEPL_RESTARTS + 1))
-    if [ "$KEEPL_RESTARTS" -gt "$KEEPL_MAX_RESTARTS" ]; then
-      echo "[monitor] keeplearn reached max restarts (${KEEPL_MAX_RESTARTS}); not restarting"
-      NANOBOT_PID3=""
-    else
-      echo "[monitor] restarting keeplearn in ${KEEPL_BACKOFF_SECONDS}s (attempt ${KEEPL_RESTARTS}/${KEEPL_MAX_RESTARTS})"
-      sleep "$KEEPL_BACKOFF_SECONDS"
-      KEEPL_BACKOFF_SECONDS=$((KEEPL_BACKOFF_SECONDS * 2))
-      start_keeplearn
+  # main bot: critical, exit if dies
+  if agent_enabled main && [ "${NANOBOT_PID1:-}" != "" ]; then
+    if ! kill -0 "$NANOBOT_PID1" 2>/dev/null; then
+      echo "[monitor] main bot exited"
+      exit 0
     fi
   fi
+
+  # douyin bot: critical, exit if dies
+  if agent_enabled douyin && [ "${NANOBOT_PID2:-}" != "" ]; then
+    if ! kill -0 "$NANOBOT_PID2" 2>/dev/null; then
+      echo "[monitor] douyin bot exited"
+      exit 0
+    fi
+  fi
+
+  # keeplearn bot: auto-restart on failure
+  if agent_enabled keeplearn && [ "${NANOBOT_PID3:-}" != "" ]; then
+    if ! kill -0 "$NANOBOT_PID3" 2>/dev/null; then
+      KEEPL_EXIT_CODE=0
+      wait "$NANOBOT_PID3" 2>/dev/null || KEEPL_EXIT_CODE=$?
+      echo "[monitor] keeplearn bot exited (code=${KEEPL_EXIT_CODE})"
+
+      KEEPL_RESTARTS=$((KEEPL_RESTARTS + 1))
+      if [ "$KEEPL_RESTARTS" -gt "$KEEPL_MAX_RESTARTS" ]; then
+        echo "[monitor] keeplearn reached max restarts (${KEEPL_MAX_RESTARTS}); not restarting"
+        NANOBOT_PID3=""
+      else
+        echo "[monitor] restarting keeplearn in ${KEEPL_BACKOFF_SECONDS}s (attempt ${KEEPL_RESTARTS}/${KEEPL_MAX_RESTARTS})"
+        sleep "$KEEPL_BACKOFF_SECONDS"
+        KEEPL_BACKOFF_SECONDS=$((KEEPL_BACKOFF_SECONDS * 2))
+        start_keeplearn
+      fi
+    fi
+  fi
+
+  # If no agents enabled, exit
+  if [ "${NANOBOT_PID1:-}" = "" ] && [ "${NANOBOT_PID2:-}" = "" ] && [ "${NANOBOT_PID3:-}" = "" ]; then
+    echo "[monitor] no agents running, exiting"
+    exit 0
+  fi
+
   sleep 2
 done
