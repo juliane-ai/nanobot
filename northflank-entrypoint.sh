@@ -42,7 +42,7 @@ fi
 S3_URI="s3://${S3_BUCKET}/${S3_PREFIX}"
 INTERVAL="${SYNC_INTERVAL_SECONDS:-120}"
 
-SYNC_EXCLUDES="--exclude workspace-keeplearn/keep-learn-note/*"
+SYNC_EXCLUDES="--exclude workspace-keeplearn/keep-learn-note/* --exclude 'workspace*/.git/*' --exclude 'workspace*/**/.git/*' --exclude '.github-manager.json'"
 
 aws_cli() {
   aws --endpoint-url "$AWS_ENDPOINT_URL" "$@"
@@ -71,11 +71,17 @@ shutdown() {
   if [ "${NANOBOT_PID2:-}" != "" ]; then
     kill "$NANOBOT_PID2" 2>/dev/null || true
   fi
+  if [ "${NANOBOT_PID3:-}" != "" ]; then
+    kill "$NANOBOT_PID3" 2>/dev/null || true
+  fi
   if [ "${NANOBOT_PID1:-}" != "" ]; then
     wait "$NANOBOT_PID1" 2>/dev/null || true
   fi
   if [ "${NANOBOT_PID2:-}" != "" ]; then
     wait "$NANOBOT_PID2" 2>/dev/null || true
+  fi
+  if [ "${NANOBOT_PID3:-}" != "" ]; then
+    wait "$NANOBOT_PID3" 2>/dev/null || true
   fi
   echo "[shutdown] final sync..."
   aws_cli s3 sync "$NANOBOT_HOME" "$S3_URI" $SYNC_EXCLUDES || true
@@ -98,9 +104,17 @@ nanobot gateway --config "${NANOBOT_HOME}/config-douyin.json" --port 18791 &
 NANOBOT_PID2=$!
 
 # 启动持续学习机器人（端口 18793）
-echo "[boot] starting keeplearn bot on port 18793..."
-nanobot gateway --config "${NANOBOT_HOME}/config-keeplearn.json" --port 18793 &
-NANOBOT_PID3=$!
+KEEPL_RESTARTS=0
+KEEPL_MAX_RESTARTS="${KEEPL_MAX_RESTARTS:-5}"
+KEEPL_BACKOFF_SECONDS="${KEEPL_BACKOFF_SECONDS:-5}"
+
+start_keeplearn() {
+  echo "[boot] starting keeplearn bot on port 18793..."
+  nanobot gateway --config "${NANOBOT_HOME}/config-keeplearn.json" --port 18793 &
+  NANOBOT_PID3=$!
+}
+
+start_keeplearn
 
 # 兼容 /bin/sh：持续运行直到任一子进程退出
 while true; do
@@ -113,8 +127,20 @@ while true; do
     exit 0
   fi
   if ! kill -0 "$NANOBOT_PID3" 2>/dev/null; then
-    echo "[monitor] keeplearn bot exited"
-    exit 0
+    KEEPL_EXIT_CODE=0
+    wait "$NANOBOT_PID3" 2>/dev/null || KEEPL_EXIT_CODE=$?
+    echo "[monitor] keeplearn bot exited (code=${KEEPL_EXIT_CODE})"
+
+    KEEPL_RESTARTS=$((KEEPL_RESTARTS + 1))
+    if [ "$KEEPL_RESTARTS" -gt "$KEEPL_MAX_RESTARTS" ]; then
+      echo "[monitor] keeplearn reached max restarts (${KEEPL_MAX_RESTARTS}); not restarting"
+      NANOBOT_PID3=""
+    else
+      echo "[monitor] restarting keeplearn in ${KEEPL_BACKOFF_SECONDS}s (attempt ${KEEPL_RESTARTS}/${KEEPL_MAX_RESTARTS})"
+      sleep "$KEEPL_BACKOFF_SECONDS"
+      KEEPL_BACKOFF_SECONDS=$((KEEPL_BACKOFF_SECONDS * 2))
+      start_keeplearn
+    fi
   fi
   sleep 2
 done
